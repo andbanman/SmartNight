@@ -372,6 +372,10 @@ public:
                       LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing);
 
     void writeToProto(LayerProto* layerInfo, int32_t hwcId);
+    bool mIsWhiteDominant = false;
+    bool isWhiteDominant();
+    bool skipInversion();
+    bool isVideo();
 
 protected:
     /*

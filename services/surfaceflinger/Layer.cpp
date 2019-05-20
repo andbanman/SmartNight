@@ -2015,6 +2015,146 @@ void Layer::writeToProto(LayerProto* layerInfo, int32_t hwcId) {
     }
 }
 
+// Parse RBG values from pixel located at pixel
+void pixelRGB_888(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    *r = *((uint8_t *) (pixel));
+    *g = *((uint8_t *) (pixel + 1));
+    *b = *((uint8_t *) (pixel + 2));
+}
+void pixelRGBX_8888(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    uint32_t p = *((uint32_t *) pixel);
+    *r = (p & 0x000000ff);
+    *g = (p & 0x0000ff00) >> 8;
+    *b = (p & 0x00ff0000) >> 16;
+}
+void pixelBGRA_8888(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    uint32_t p = *((uint32_t *) pixel);
+    *b = (p & 0x000000ff);
+    *g = (p & 0x0000ff00) >> 8;
+    *r = (p & 0x00ff0000) >> 16;
+}
+void pixelRGBA_10102(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    uint32_t p = *((uint32_t *) pixel);
+    *r = (p & 0x000003ff);
+    *g = (p & 0x000ffc00) >> 10;
+    *b = (p & 0x3ff00000) >> 20;
+}
+void pixelRGB_565(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    uint16_t p = *((uint16_t *) pixel);
+    *r = (p & 0x001f);
+    *g = (p & 0x07e0) >> 5;
+    *b = (p & 0xf800) >> 11;
+}
+void pixelRGB_5551(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    uint16_t p = *((uint16_t *) pixel);
+    *r = (p & 0x001f);
+    *g = (p & 0x03e0) >> 5;
+    *b = (p & 0x7c00) >> 10;
+}
+void pixelRGB_4444(unsigned char * pixel, uint32_t *r, uint32_t *g, uint32_t *b) {
+    uint16_t p = *((uint16_t *) pixel);
+    *r = (p & 0x000f);
+    *g = (p & 0x00f0) >> 4;
+    *b = (p & 0x0f00) >> 8;
+}
+
+bool Layer::isWhiteDominant() {
+    sp<android::GraphicBuffer> buffer = getBE().compositionInfo.mBuffer;
+    unsigned char *pBitmap = NULL;
+    buffer->lock(GraphicBuffer::USAGE_SW_READ_OFTEN, (void **) &pBitmap);
+    PixelFormat pfmt = buffer->getPixelFormat();
+    unsigned width = buffer->getWidth();
+    unsigned height = buffer->getHeight();
+    unsigned pixelSizeBytes = bytesPerPixel(pfmt);
+    unsigned nblack = 0;
+    unsigned nwhite = 0;
+    unsigned max = 1;
+    // Sample the buffer ~ 50x50 = 2500 samples
+    unsigned rstride = (height / 49) + 1;
+    unsigned cstride = (width / 49) + 1;
+    void (*parsePixel) (unsigned char *, uint32_t *, uint32_t *, uint32_t *);
+
+    switch (pfmt) {
+        case PIXEL_FORMAT_RGB_888:
+            {
+                parsePixel = pixelRGB_888;
+                max = 0xFF << 3;
+                break;
+            }
+        case PIXEL_FORMAT_RGBA_8888:
+        case PIXEL_FORMAT_RGBX_8888:
+            {
+                parsePixel = pixelRGBX_8888;
+                max = 0xFF << 3;
+                break;
+            }
+        case PIXEL_FORMAT_BGRA_8888:
+            {
+                parsePixel = pixelBGRA_8888;
+                max = 0xFF << 3;
+                break;
+            }
+        case PIXEL_FORMAT_RGBA_1010102:
+            {
+                parsePixel = pixelRGBA_10102;
+                max = 0x3FF << 3;
+                break;
+            }
+        case PIXEL_FORMAT_RGB_565:
+            {
+                parsePixel = pixelRGB_565;
+                max = (0x1F << 2) + (0x3F << 2);
+                break;
+            }
+        case PIXEL_FORMAT_RGBA_5551:
+            {
+                parsePixel = pixelRGB_5551;
+                max = 0x1F << 3;
+                break;
+            }
+        case PIXEL_FORMAT_RGBA_4444:
+            {
+                parsePixel = pixelRGB_4444;
+                max = 0xF << 3;
+                break;
+            }
+        case PIXEL_FORMAT_RGBA_FP16: //TODO: no idea
+        default:
+            return (mIsWhiteDominant = false);
+    }
+
+    short i = 0;
+    for (unsigned r = 0; r < height; r += rstride) {
+        i++;
+        for (unsigned c = cstride/3 * (i%3); c < width; c += cstride) {
+            unsigned char *pixel = pBitmap + pixelSizeBytes * c + (pixelSizeBytes * width) * r;
+            uint32_t r = 0;
+            uint32_t g = 0;
+            uint32_t b = 0;
+            uint32_t lum = 0;
+
+            // Determine if pixel is closer to white or black
+            parsePixel(pixel, &r, &g, &b);
+            lum = ((r+r+r+b+g+g+g+g) * 100) / max;
+            if (lum > 60) {
+              ++nwhite;
+            } else if (lum < 40) {
+              ++nblack;
+            }
+        }
+    }
+    buffer->unlock();
+    return (mIsWhiteDominant = nwhite > nblack);
+}
+
+bool Layer::isVideo() {
+    return false;
+}
+
+bool Layer::skipInversion() {
+    return (!mIsWhiteDominant || isVideo());
+}
+
 // ---------------------------------------------------------------------------
 
 }; // namespace android

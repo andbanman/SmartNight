@@ -2947,6 +2947,7 @@ bool SurfaceFlinger::handlePageFlip()
         layer->useSurfaceDamage();
         invalidateLayerStack(layer, dirty);
         if (layer->isBufferLatched()) {
+            layer->isWhiteDominant(); // latch called typically when content changed
             newDataLatched = true;
         }
     }
@@ -3010,6 +3011,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
     bool applyColorMatrix = false;
     bool needsEnhancedColorMatrix = false;
 
+    mat4 colorMatrix;
+
     if (hasClientComposition) {
         ALOGV("hasClientComposition");
 
@@ -3025,7 +3028,6 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
         const bool skipClientColorTransform = getBE().mHwc->hasCapability(
             HWC2::Capability::SkipClientColorTransform);
 
-        mat4 colorMatrix;
         applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
         if (applyColorMatrix) {
             colorMatrix = mDrawingState.colorMatrix;
@@ -3041,6 +3043,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
             colorMatrix *= mEnhancedSaturationMatrix;
         }
 
+        //ABANMAN : switch on if black or white dominant
         getRenderEngine().setupColorTransform(colorMatrix);
 
         if (!displayDevice->makeCurrent()) {
@@ -3123,8 +3126,14 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                     break;
                 }
                 case HWC2::Composition::Client: {
-                    layer->draw(renderArea, clip);
-                    break;
+                    if (layer->skipInversion()) {
+                        // side-step the transform
+                        getRenderEngine().setupColorTransform(mat4());
+                        layer->draw(renderArea, clip);
+                        getRenderEngine().setupColorTransform(colorMatrix);
+                    } else {
+                        layer->draw(renderArea, clip);
+                    }
                 }
                 default:
                     break;
