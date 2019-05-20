@@ -1,6 +1,4 @@
-# android-native
-
-$ SmartNight: Turning Off the Lights on Android
+# SmartNight: Turning Off the Lights on Android
 
 Andrew Banman
 
